@@ -18,7 +18,7 @@ import utilities.transformer as trans
 import utilities.event_simulator as es
 import utilities.analyzer as a
 import utilities.evaluation as eva
-
+import json
 
 debug_flag = False  # flag to have breakpoint() when errors occur
 
@@ -475,7 +475,159 @@ def main():
         #         "output/3plots/heatmap" + "_our_react"
         #         + "_g=" + str(args.g) + ".pdf",
         #         yaxis_label="")
+    elif args.j == 4:
+        """Evaluation.
 
+        Required arguments:
+        -j3
+        -g : task generation setting (for loading)
+        -u : ulilisation
+        -n
+        """
+        # Variables.
+        #gen_setting = args.g
+        #utilizations = [50.0, 60.0, 70.0, 80.0, 90.0]
+        
+        #LetSynchronise data structure
+        system = {
+            "ConstraintStore" : [], 
+            "DependencyStore" : [],
+            "EventChainStore" : [],
+            "SystemInputStore" : [],
+            "SystemOutputStore" : [],
+            "TaskStore" : [],
+            }
+        unitscale = 1000000
+        try:
+            ###
+            # Load data.
+            ###
+            print("=Load data.=")
+            #chains_single_ECU = []
+            #chains_inter = []
+            #python main.py -j4 -g1 -u50 -n0
+            #python main.py -j4 -g0 -u50 -n0
+            data = np.load(
+                    "output/1single/task_set_" + "u=" + str(args.u)
+                    + "_n=" + str(args.n) + "_g=" + str(args.g) + ".npz", allow_pickle=True)
 
+            print(data.f)
+            task_sets = data.f.task_sets
+            chains = data.f.chains
+            # Single ECU.
+            for idxx in range(len(task_sets)):
+                print("--------------------------------------- " + str(idxx))
+                for task in task_sets[idxx]:
+                    print(task)
+                    #self.id 
+                    #self.phase 
+                    #self.bcet 
+                    #self.wcet 
+                    #self.period 
+                    #self.deadline 
+                    #self.priority 
+                    #self.message 
+                    l_task = {
+                        "name": "task"+str(task.id),
+                         "initialOffset":(task.phase/unitscale),
+                         "activationOffset":0,
+                         "duration":(task.deadline/unitscale),
+                         "period":(task.period/unitscale),
+                         "inputs":[
+                            "in"
+                         ],
+                         "outputs":[
+                            "out"
+                         ]
+                    }
+                    system["TaskStore"].append(l_task)
+                for chain in chains[idxx]:
+                    l_chain = {};
+                    l_chain_last = {};
+                    print("chain: "+str(chain.id))
+                    first = True
+                    second = True
+                    previousTask = None #assuming chain is by order
+                    for task in chain.chain:
+                        print("T:"+str(task.id))
+                        if first:
+                            previousTask = task;
+                            first = False
+                            continue;
+                        else:
+                            dependencyName = "dep_"+str(chain.id)+"_"+str(previousTask.id)+"_"+str(task.id)
+                            dependencySourceTask =  "task"+str(previousTask.id)
+                            dependencySourcePort = "out"
+                            
+                            dependencyDestTask = "task"+str(task.id)
+                            dependencyDestPort = "in"
+                            l_dependency = {
+                                 "name":dependencyName,
+                                 "source":{
+                                    "task":dependencySourceTask,
+                                    "port":dependencySourcePort
+                                 },
+                                 "destination":{
+                                    "task":dependencyDestTask,
+                                    "port":dependencyDestPort
+                                 }
+                            }
+                            system["DependencyStore"].append(l_dependency)
+                            
+                            #event chain
+                            if second:
+                                second = False
+                                l_chain_last = {"name" : "chain_"+str(chain.id),
+                                           "segment":{
+                                                "name":dependencyName,
+                                                "source":{
+                                                   "task":dependencySourceTask,
+                                                   "port":dependencySourcePort
+                                                },
+                                                "destination":{
+                                                   "task":dependencyDestTask,
+                                                   "port":dependencyDestPort
+                                                }
+                                            }
+                                          }
+                                l_chain = l_chain_last
+                            else:
+                                l_successor = {"segment":{
+                                                "name":dependencyName,
+                                                "source":{
+                                                   "task":dependencySourceTask,
+                                                   "port":dependencySourcePort
+                                                },
+                                                "destination":{
+                                                   "task":dependencyDestTask,
+                                                   "port":dependencyDestPort
+                                                }
+                                            }}
+                                
+                                l_chain_last["successor"] = l_successor
+                                print(l_chain)
+                                print(l_chain_last)
+                                l_chain_last = l_chain_last["successor"]
+                                
+                            previousTask = task;
+                    system["EventChainStore"].append(l_chain)
+                    
+            # Interconnected.
+            #for chain in data.f.chains_inter:
+            #    chains_inter.append(chain)
+
+            # Close data file and run the garbage collector.
+            data.close()
+            del data
+            gc.collect()
+        except Exception as e:
+            print(e)
+            if debug_flag:
+                breakpoint()
+            else:
+                return
+        
+        with open('output/LetSynchronise/system.json', 'w') as outfile:
+            json.dump(system, outfile)
 if __name__ == '__main__':
     main()
