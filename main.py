@@ -19,6 +19,7 @@ import utilities.event_simulator as es
 import utilities.analyzer as a
 import utilities.evaluation as eva
 import json
+import os
 
 debug_flag = False  # flag to have breakpoint() when errors occur
 
@@ -45,7 +46,14 @@ def main():
 
     args = parser.parse_args()
     del parser
-
+    if (not os.path.exists('output/1single')):
+        os.makedirs('output/1single');
+    if (not os.path.exists('output/2interconn')):
+        os.makedirs('output/2interconn');
+    if (not os.path.exists('output/3plots')):
+        os.makedirs('output/3plots');
+    if (not os.path.exists('output/LetSynchronise')):
+        os.makedirs('output/LetSynchronise');
     if args.j == 1:
         """Single ECU analysis.
 
