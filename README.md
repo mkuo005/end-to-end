@@ -153,6 +153,12 @@ Fig. 10 | runtime_tasks.pdf
 
 With the same machine as above, ```auto_runtime_jobs.sh 100``` is finished in less than one minute and ```auto_runtime_tasks.sh 100``` is finished after about 30 minutes.
 
+## How to export to LetSynchronise
+
+- Makes sure you have outputs for single ECU analysis as the task sets are used for the export.
+    - You can run ```python main.py -j1 -g0 -u50 -n0``` to generate a single ECU analysis task (-j1) set with the WATERS benchmark (-g0) and uutlisation of 50% (-u50). Number of runs ignored.
+- To export the task sets to LetSynchronise (-j4) run ```python main.py -j4 -g0 -u50 -n0```.
+
 ## How to use VM
 
 - Please download the [zip file](https://tu-dortmund.sciebo.de/s/GcftlevzCwg7Zaz), which contains the virtual disk and the machine description. The credential is: end2end/rtas21
