@@ -82,7 +82,6 @@ class Analyzer:
         while True:
             # We start with position = 0 (1st job).
             position += 1
-
             # Checking for mistakes.
             if len(schedule.get(chain.chain[-1])) < position:
                 if debug_flag:

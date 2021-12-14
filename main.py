@@ -20,6 +20,8 @@ import utilities.analyzer as a
 import utilities.evaluation as eva
 import json
 import os
+import utilities.task as Task
+import utilities.chain as Chain
 
 debug_flag = False  # flag to have breakpoint() when errors occur
 
@@ -149,126 +151,9 @@ def main():
                 task_sets = []
                 ce_chains = []
 
-        ###
-        # First analyses (TDA, Davare, Duerr).
-        ###
-        print("=First analyses (TDA, Davare, Duerr).=")
-        analyzer = a.Analyzer("0")
+    
 
-        try:
-            # TDA for each task set.
-            print("TDA.")
-            for idxx in range(len(task_sets)):
-                try:
-                    # TDA.
-                    i = 1
-                    for task in task_sets[idxx]:
-                        # Prevent WCET = 0 since the scheduler can
-                        # not handle this yet. This case can occur due to
-                        # rounding with the transformer.
-                        if task.wcet == 0:
-                            raise ValueError("WCET == 0")
-                        task.rt = analyzer.tda(task, task_sets[idxx][:(i - 1)])
-                        if task.rt > task.deadline:
-                            raise ValueError(
-                                    "TDA Result: WCRT bigger than deadline!")
-                        i += 1
-                except ValueError:
-                    # If TDA fails, remove task and chain set and continue.
-                    task_sets.remove(task_sets[idxx])
-                    ce_chains.remove(ce_chains[idxx])
-                    continue
-
-            # End-to-End Analyses.
-            print("Test: Davare.")
-            analyzer.davare(ce_chains)
-
-            print("Test: Duerr Reaction Time.")
-            analyzer.reaction_duerr(ce_chains)
-
-            print("Test: Duerr Data Age.")
-            analyzer.age_duerr(ce_chains)
-
-            ###
-            # Second analyses (Simulation, Our, Kloda).
-            ###
-            print("=Second analyses (Simulation, Our, Kloda).=")
-            i = 0  # task set counter
-            schedules = []
-            for task_set in task_sets:
-                print("=Task set ", i+1)
-
-                # Skip if there is no corresponding cause-effect chain.
-                if len(ce_chains[i]) == 0:
-                    continue
-
-                # Event-based simulation.
-                print("Simulation.")
-
-                simulator = es.eventSimulator(task_set)
-
-                # Determination of the variables used to compute the stop
-                # condition of the simulation
-                max_e2e_latency = max(ce_chains[i], key=lambda chain:
-                                      chain.davare).davare
-                max_phase = max(task_set, key=lambda task: task.phase).phase
-                max_period = max(task_set, key=lambda task: task.period).period
-                hyper_period = analyzer.determine_hyper_period(task_set)
-
-                sched_interval = (
-                        2 * hyper_period + max_phase  # interval from paper
-                        + max_e2e_latency  # upper bound job chain length
-                        + max_period)  # for convenience
-
-                # Information for end user.
-                print("\tNumber of tasks: ", len(task_set))
-                print("\tHyperperiod: ", hyper_period)
-                number_of_jobs = 0
-                for task in task_set:
-                    number_of_jobs += sched_interval/task.period
-                print("\tNumber of jobs to schedule: ",
-                      "%.2f" % number_of_jobs)
-
-                # Stop condition: Number of jobs of lowest priority task.
-                simulator.dispatcher(
-                        int(math.ceil(sched_interval/task_set[-1].period)))
-
-                # Simulation without early completion.
-                schedule = simulator.e2e_result()
-                schedules.append(schedule)
-
-                # Analyses.
-                for chain in ce_chains[i]:
-                    print("Test: Our Data Age.")
-                    analyzer.max_age_our(schedule, task_set, chain, max_phase,
-                                         hyper_period, reduced=False)
-                    analyzer.max_age_our(schedule, task_set, chain, max_phase,
-                                         hyper_period, reduced=True)
-
-                    print("Test: Our Reaction Time.")
-                    analyzer.reaction_our(schedule, task_set, chain, max_phase,
-                                          hyper_period)
-
-                    # Kloda analysis, assuming synchronous releases.
-                    print("Test: Kloda.")
-                    analyzer.kloda(chain, hyper_period)
-
-                    # Test.
-                    if chain.kloda < chain.our_react:
-                        if debug_flag:
-                            breakpoint()
-                        else:
-                            raise ValueError(
-                                    ".kloda is shorter than .our_react")
-                i += 1
-        except Exception as e:
-            print(e)
-            print("ERROR: analysis")
-            if debug_flag:
-                breakpoint()
-            else:
-                task_sets = []
-                ce_chains = []
+        task_sets, ce_chains = singleECUAnalysis(task_sets, ce_chains)
 
         ###
         # Save data.
@@ -287,7 +172,7 @@ def main():
                 breakpoint()
             else:
                 return
-
+        
     elif args.j == 2:
         """Interconnected ECU analysis.
 
@@ -546,7 +431,11 @@ def main():
                          ],
                          "outputs":[
                             "out"
-                         ]
+                         ],
+                        "wcet" : (task.wcet),
+                        "bcet" : (task.bcet),
+                        "priority" : task.priority,
+                        "message" : task.message
                     }
                     system["TaskStore"].append(l_task)
                 for chain in chains[idxx]:
@@ -637,5 +526,248 @@ def main():
         
         with open('output/LetSynchronise/system.json', 'w') as outfile:
             json.dump(system, outfile)
+    elif args.j == 5:
+        try:
+            ###
+            # Load data.
+            ###
+            print("=Load data.=")
+            #chains_single_ECU = []
+            #chains_inter = []
+            #python main.py -j4 -g1 -u50 -n0
+            #python main.py -j4 -g0 -u50 -n0
+            data = np.load(
+                    "output/1single/task_set_" + "u=" + str(args.u)
+                    + "_n=" + str(args.n) + "_g=" + str(args.g) + ".npz", allow_pickle=True)
+
+            print(data.f)
+            #tasks_single_ECU = [] 
+            #chains_single_ECU = []
+            #for chain_set in data.f.chains:
+            #    for chain in chain_set:
+            #        chain.davare = 0  # Davare
+            #        chain.duerr_age = 0  # Duerr max data age
+            #        chain.duerr_react = 0  # Duerr max reaction time
+            #        chain.our_age = 0  # Our max data age
+            #        chain.our_react = 0  # Our max reaction time
+            #        chain.our_red_age = 0  # Our reduced max data age
+            #        chain.inter_our_age = 0  # Our max data age for interconn
+            #        chain.inter_our_red_age = 0  # Our reduced max data age for interconn
+            #        chain.inter_our_react = 0  # Our max reaction time for interconn
+            #        chain.kloda = 0  # Kloda
+            #for task_set in data.f.task_sets:
+            #    for task in task_set:
+
+            #        tasks_single_ECU.append(task)
+            #        chains_single_ECU.append(chain)
+            task_sets = data.f.task_sets
+            chains = data.f.chains
+
+            #for set in task_sets:
+            #    for s in set:
+            #        s.rt = 0
+            #        print(s)
+            #for c in chains:
+            #    for s in c:
+            #        print(s)
+            #for task_set in data.f.task_sets:
+            #    for task in task_set:
+            #        tasks_single_ECU.append(task)
+
+            print("===Begin analysis===")
+            #print(task_sets)
+            #print(chains)
+            relink_chains(task_sets, chains)
+            #ce_chains = waters.gen_ce_chains(task_sets)
+            task_sets, chains = singleECUAnalysis(task_sets, chains)
+            
+            # Close data file and run the garbage collector.
+            data.close()
+            del data
+            gc.collect()
+        except Exception as e:
+            print(e)
+            if debug_flag:
+                breakpoint()
+            else:
+                return
+    elif args.j == 6:
+        unitscale = 1000000
+        f = open('output/LetSynchronise/system.json')
+        system = json.load(f)
+        #"ConstraintStore" , "DependencyStore", "EventChainStore", "SystemInputStore", "SystemOutputStore", "TaskStore" 
+        task_set = []
+        chains = []
+        task_id_map = {}
+        id_counter = 0
+        for t in system['TaskStore']:
+            #task_set.append(Task.Task(task_id=id_counter, task_phase=int(t['initialOffset'] * unitscale), task_bcet=int(t['bcet']), task_wcet=int(t['wcet']), task_period=int(t['period']*unitscale), task_deadline=int(t['duration']*unitscale), priority=t['priority'], message=t['message']))
+            task_set.append(Task.Task(task_id=id_counter, task_phase=int(t['initialOffset'] * unitscale), task_bcet=int(t['bcet']), task_wcet=int(t['wcet']), task_period=int(t['period']*unitscale), task_deadline=int(t['duration']*unitscale), priority=t['priority'], message=False))
+            task_id_map[str(t['name'])] = id_counter
+            id_counter = id_counter + 1
+
+        id_counter = 0
+        for c in system['EventChainStore']:
+            chain = []
+            successor = c.get('successor')
+            #print(c)
+            #print("-------------------------")
+            #print(task_id_map.get(c.get('segment').get('source').get('task')))
+            chain.append(task_set[task_id_map.get(c.get('segment').get('source').get('task'))])
+            chain.append(task_set[task_id_map.get(c.get('segment').get('destination').get('task'))])
+            while(successor != None):
+                chain.append(task_set[task_id_map.get(successor.get('segment').get('destination').get('task'))])
+                successor = successor.get('successor')
+            chains.append(Chain.CauseEffectChain(id = id_counter, chain=chain, interconnected=[]))
+            id_counter = id_counter + 1
+
+        for t in task_set:
+            print(t)
+        print("===Begin analysis===")
+        task_sets = [task_set] #single set
+        ce_chains = [chains] #single chain set
+
+        task_sets, chains = singleECUAnalysis(task_sets, ce_chains)
+
+def relink_chains(task_sets, chains):
+    ce_chains = []
+    for idxx in range(len(task_sets)):
+        for c in chains[idxx]:
+            #print (c.chain)
+            for i in range(len(c.chain)):
+                for t in task_sets[idxx]:
+                    if (c.chain[i].id == t.id):
+                        c.chain[i] = t
+                        break
+            #interconnect not yet taken care of as focused on single ECU
+
+    return ce_chains
+
+def singleECUAnalysis(task_sets, ce_chains):
+    ###
+    # First analyses (TDA, Davare, Duerr).
+    ###
+    print("=First analyses (TDA, Davare, Duerr).=")
+    analyzer = a.Analyzer("0")
+
+    try:
+        # TDA for each task set.
+        print("TDA.")
+        for idxx in range(len(task_sets)):
+            try:
+                # TDA.
+                i = 1
+                for task in task_sets[idxx]:
+                    # Prevent WCET = 0 since the scheduler can
+                    # not handle this yet. This case can occur due to
+                    # rounding with the transformer.
+                    if task.wcet == 0:
+                        raise ValueError("WCET == 0")
+                    task.rt = analyzer.tda(task, task_sets[idxx][:(i - 1)])
+                    if task.rt > task.deadline:
+                        raise ValueError(
+                                    "TDA Result: WCRT bigger than deadline!")
+                    i += 1
+            except ValueError:
+                # If TDA fails, remove task and chain set and continue.
+                task_sets.remove(task_sets[idxx])
+                ce_chains.remove(ce_chains[idxx])
+                continue
+             
+        # End-to-End Analyses.
+        print("Test: Davare.")
+        res = analyzer.davare(ce_chains)
+        print("Davare End-to-End: "+ str(res))
+
+
+        print("Test: Duerr Reaction Time.")
+        res = analyzer.reaction_duerr(ce_chains)
+        print("Duerr Reaction Time: "+ str(res))
+
+        print("Test: Duerr Data Age.")
+        res = analyzer.age_duerr(ce_chains)
+        print("Duerr Data Age: "+ str(res))
+
+        ###
+        # Second analyses (Simulation, Our, Kloda).
+        ###
+        print("=Second analyses (Simulation, Our, Kloda).=")
+        i = 0  # task set counter
+        schedules = []
+        for task_set in task_sets:
+            print("=Task set ", i+1)
+
+            # Skip if there is no corresponding cause-effect chain.
+            if len(ce_chains[i]) == 0:
+                continue
+
+            # Event-based simulation.
+            print("Simulation.")
+
+            simulator = es.eventSimulator(task_set)
+            # Determination of the variables used to compute the stop
+            # condition of the simulation
+            max_e2e_latency = max(ce_chains[i], key=lambda chain:
+                                      chain.davare).davare
+            max_phase = max(task_set, key=lambda task: task.phase).phase
+            max_period = max(task_set, key=lambda task: task.period).period
+            hyper_period = analyzer.determine_hyper_period(task_set)
+
+            sched_interval = (
+                        2 * hyper_period + max_phase  # interval from paper
+                        + max_e2e_latency  # upper bound job chain length
+                        + max_period)  # for convenience
+
+            # Information for end user.
+            print("\tNumber of tasks: ", len(task_set))
+            print("\tHyperperiod: ", hyper_period)
+            number_of_jobs = 0
+            for task in task_set:
+                number_of_jobs += sched_interval/task.period
+            print("\tNumber of jobs to schedule: ",
+                      "%.2f" % number_of_jobs)
+
+            # Stop condition: Number of jobs of lowest priority task.
+            simulator.dispatcher(
+                        int(math.ceil(sched_interval/task_set[-1].period)))
+
+            # Simulation without early completion.
+            schedule = simulator.e2e_result()
+            schedules.append(schedule)
+
+            # Analyses.
+            for chain in ce_chains[i]:
+                print("Test: Our Data Age.")
+                res = analyzer.max_age_our(schedule, task_set, chain, max_phase,
+                                         hyper_period, reduced=False)
+                print("Our Data Age One:" + str(res))
+                res = analyzer.max_age_our(schedule, task_set, chain, max_phase,
+                                         hyper_period, reduced=True)
+                print("Our Data Age Two:" + str(res))
+                print("Test: Our Reaction Time.")
+                res = analyzer.reaction_our(schedule, task_set, chain, max_phase,
+                                          hyper_period)
+                print("Our Reaction Time:" + str(res))
+                    # Kloda analysis, assuming synchronous releases.
+                print("Test: Kloda.")
+                res = analyzer.kloda(chain, hyper_period)
+                print("Kloda Analysis:" + str(res))
+                    # Test.
+                if chain.kloda < chain.our_react:
+                    if debug_flag:
+                        breakpoint()
+                    else:
+                        raise ValueError(
+                                    ".kloda is shorter than .our_react")
+            i += 1
+    except Exception as e:
+        print(e)
+        print("ERROR: analysis")
+        if debug_flag:
+            breakpoint()
+        else:
+            task_sets = []
+            ce_chains = []
+    return task_sets,ce_chains
 if __name__ == '__main__':
     main()

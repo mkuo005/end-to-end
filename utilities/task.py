@@ -19,7 +19,6 @@ class Task:
         self.message = message  # flag for communication tasks
 
         self.rt = 0  # Worst-case response time, specified during analysis
-
     def __str__(self):
         """Print a task."""
         return (" Type: {type:^}\n ID: {id:^}\n Priority: {priority:^}\n"
