@@ -20,6 +20,8 @@ import utilities.analyzer as a
 import utilities.evaluation as eva
 import json
 import os
+import utilities.task as Task
+import utilities.chain as Chain
 
 debug_flag = False  # flag to have breakpoint() when errors occur
 
@@ -429,7 +431,11 @@ def main():
                          ],
                          "outputs":[
                             "out"
-                         ]
+                         ],
+                        "wcet" : (task.wcet),
+                        "bcet" : (task.bcet),
+                        "priority" : task.priority,
+                        "message" : task.message
                     }
                     system["TaskStore"].append(l_task)
                 for chain in chains[idxx]:
@@ -585,6 +591,43 @@ def main():
                 breakpoint()
             else:
                 return
+    elif args.j == 6:
+        unitscale = 1000000
+        f = open('output/LetSynchronise/system.json')
+        system = json.load(f)
+        #"ConstraintStore" , "DependencyStore", "EventChainStore", "SystemInputStore", "SystemOutputStore", "TaskStore" 
+        task_set = []
+        chains = []
+        task_id_map = {}
+        id_counter = 0
+        for t in system['TaskStore']:
+            #task_set.append(Task.Task(task_id=id_counter, task_phase=int(t['initialOffset'] * unitscale), task_bcet=int(t['bcet']), task_wcet=int(t['wcet']), task_period=int(t['period']*unitscale), task_deadline=int(t['duration']*unitscale), priority=t['priority'], message=t['message']))
+            task_set.append(Task.Task(task_id=id_counter, task_phase=int(t['initialOffset'] * unitscale), task_bcet=int(t['bcet']), task_wcet=int(t['wcet']), task_period=int(t['period']*unitscale), task_deadline=int(t['duration']*unitscale), priority=t['priority'], message=False))
+            task_id_map[str(t['name'])] = id_counter
+            id_counter = id_counter + 1
+
+        id_counter = 0
+        for c in system['EventChainStore']:
+            chain = []
+            successor = c.get('successor')
+            #print(c)
+            #print("-------------------------")
+            #print(task_id_map.get(c.get('segment').get('source').get('task')))
+            chain.append(task_set[task_id_map.get(c.get('segment').get('source').get('task'))])
+            chain.append(task_set[task_id_map.get(c.get('segment').get('destination').get('task'))])
+            while(successor != None):
+                chain.append(task_set[task_id_map.get(successor.get('segment').get('destination').get('task'))])
+                successor = successor.get('successor')
+            chains.append(Chain.CauseEffectChain(id = id_counter, chain=chain, interconnected=[]))
+            id_counter = id_counter + 1
+
+        for t in task_set:
+            print(t)
+        print("===Begin analysis===")
+        task_sets = [task_set] #single set
+        ce_chains = [chains] #single chain set
+
+        task_sets, chains = singleECUAnalysis(task_sets, ce_chains)
 
 def relink_chains(task_sets, chains):
     ce_chains = []
