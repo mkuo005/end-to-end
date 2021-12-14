@@ -37,3 +37,9 @@ class CauseEffectChain:
         """
         return sum(1 if self.chain[i].priority > self.chain[i+1].priority
                    else 0 for i in range(len(self.chain)-1))
+
+    def __str__(self):
+        """Print a chain."""
+        return (" Type: {type:^}\n ID: {id:^}").format(
+                        type='Chain',
+                        id=self.id)

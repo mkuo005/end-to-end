@@ -149,6 +149,8 @@ def main():
                 task_sets = []
                 ce_chains = []
 
+    
+
         task_sets, ce_chains = singleECUAnalysis(task_sets, ce_chains)
 
         ###
@@ -535,18 +537,18 @@ def main():
             print(data.f)
             #tasks_single_ECU = [] 
             #chains_single_ECU = []
-            for chain_set in data.f.chains:
-                for chain in chain_set:
-                    chain.davare = 0  # Davare
-                    chain.duerr_age = 0  # Duerr max data age
-                    chain.duerr_react = 0  # Duerr max reaction time
-                    chain.our_age = 0  # Our max data age
-                    chain.our_react = 0  # Our max reaction time
-                    chain.our_red_age = 0  # Our reduced max data age
-                    chain.inter_our_age = 0  # Our max data age for interconn
-                    chain.inter_our_red_age = 0  # Our reduced max data age for interconn
-                    chain.inter_our_react = 0  # Our max reaction time for interconn
-                    chain.kloda = 0  # Kloda
+            #for chain_set in data.f.chains:
+            #    for chain in chain_set:
+            #        chain.davare = 0  # Davare
+            #        chain.duerr_age = 0  # Duerr max data age
+            #        chain.duerr_react = 0  # Duerr max reaction time
+            #        chain.our_age = 0  # Our max data age
+            #        chain.our_react = 0  # Our max reaction time
+            #        chain.our_red_age = 0  # Our reduced max data age
+            #        chain.inter_our_age = 0  # Our max data age for interconn
+            #        chain.inter_our_red_age = 0  # Our reduced max data age for interconn
+            #        chain.inter_our_react = 0  # Our max reaction time for interconn
+            #        chain.kloda = 0  # Kloda
             #for task_set in data.f.task_sets:
             #    for task in task_set:
 
@@ -555,7 +557,13 @@ def main():
             task_sets = data.f.task_sets
             chains = data.f.chains
 
-
+            #for set in task_sets:
+            #    for s in set:
+            #        s.rt = 0
+            #        print(s)
+            #for c in chains:
+            #    for s in c:
+            #        print(s)
             #for task_set in data.f.task_sets:
             #    for task in task_set:
             #        tasks_single_ECU.append(task)
@@ -563,8 +571,10 @@ def main():
             print("===Begin analysis===")
             #print(task_sets)
             #print(chains)
-            singleECUAnalysis(task_sets, chains)
-
+            relink_chains(task_sets, chains)
+            #ce_chains = waters.gen_ce_chains(task_sets)
+            task_sets, chains = singleECUAnalysis(task_sets, chains)
+            
             # Close data file and run the garbage collector.
             data.close()
             del data
@@ -575,6 +585,20 @@ def main():
                 breakpoint()
             else:
                 return
+
+def relink_chains(task_sets, chains):
+    ce_chains = []
+    for idxx in range(len(task_sets)):
+        for c in chains[idxx]:
+            #print (c.chain)
+            for i in range(len(c.chain)):
+                for t in task_sets[idxx]:
+                    if (c.chain[i].id == t.id):
+                        c.chain[i] = t
+                        break
+            #interconnect not yet taken care of as focused on single ECU
+
+    return ce_chains
 
 def singleECUAnalysis(task_sets, ce_chains):
     ###
@@ -638,7 +662,6 @@ def singleECUAnalysis(task_sets, ce_chains):
             print("Simulation.")
 
             simulator = es.eventSimulator(task_set)
-
             # Determination of the variables used to compute the stop
             # condition of the simulation
             max_e2e_latency = max(ce_chains[i], key=lambda chain:
