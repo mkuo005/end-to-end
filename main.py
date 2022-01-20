@@ -45,6 +45,8 @@ def main():
     parser.add_argument("-n", type=int, default=-1)
     # number of task sets to generate:
     parser.add_argument("-r", type=int, default=1)
+    
+    parser.add_argument("-f", type=str, default="")
 
     args = parser.parse_args()
     del parser
@@ -593,7 +595,12 @@ def main():
                 return
     elif args.j == 6:
         unitscale = 1000000
-        f = open('output/LetSynchronise/system.json')
+        if (len(args.f) == 0):
+            print("Please specify input LetSynchronise json")
+            return 0;
+               
+        #f = open('output/LetSynchronise/system.json')
+        f = open(args.f)
         system = json.load(f)
         #"ConstraintStore" , "DependencyStore", "EventChainStore", "SystemInputStore", "SystemOutputStore", "TaskStore" 
         task_set = []
