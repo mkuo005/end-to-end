@@ -158,7 +158,7 @@ With the same machine as above, ```auto_runtime_jobs.sh 100``` is finished in le
 - Makes sure you have outputs for single ECU analysis as the task sets are used for the export.
     - You can run ```python main.py -j1 -g0 -u50 -n0``` to generate a single ECU analysis task (-j1) set with the WATERS benchmark (-g0) and uutlisation of 50% (-u50). Number of runs ignored.
 - To export the task sets to LetSynchronise (-j4) run ```python main.py -j4 -g0 -u50 -n0```.
-- The exported file will be in ```output\LetSynchronise\system.json```.
+- The exported file will be in ```output/LetSynchronise/system.json```.
 
 ## How to import from LetSynchronise
 - The format is -j6 -f (full path to LetsSyncrhonise JSON)
