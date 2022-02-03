@@ -434,10 +434,12 @@ def main():
                          "outputs":[
                             "out"
                          ],
-                        "wcet" : (task.wcet),
-                        "bcet" : (task.bcet),
-                        "priority" : task.priority,
-                        "message" : task.message
+                        "wcet" : (task.wcet/unitscale),
+                        "bcet" : (task.bcet/unitscale),
+                        "acet" : (task.wcet-task.bcet)/2/unitscale, # assume averge is in the middle
+                        "distribution":"Normal" #assume normal distribution
+                        #"priority" : task.priority, #not currently accepted by LetSynchronise
+                        #"message" : task.message  #not currently accepted by LetSynchronise
                     }
                     system["TaskStore"].append(l_task)
                 for chain in chains[idxx]:
@@ -609,7 +611,7 @@ def main():
         id_counter = 0
         for t in system['TaskStore']:
             #task_set.append(Task.Task(task_id=id_counter, task_phase=int(t['initialOffset'] * unitscale), task_bcet=int(t['bcet']), task_wcet=int(t['wcet']), task_period=int(t['period']*unitscale), task_deadline=int(t['duration']*unitscale), priority=t['priority'], message=t['message']))
-            task_set.append(Task.Task(task_id=id_counter, task_phase=int(t['initialOffset'] * unitscale), task_bcet=int(t['bcet']), task_wcet=int(t['wcet']), task_period=int(t['period']*unitscale), task_deadline=int(t['duration']*unitscale), priority=t['priority'], message=False))
+            task_set.append(Task.Task(task_id=id_counter, task_phase=int(t['initialOffset'] * unitscale), task_bcet=int(t['bcet']* unitscale), task_wcet=int(t['wcet']* unitscale), task_period=int(t['period']*unitscale), task_deadline=int(t['duration']*unitscale), priority=id_counter, message=False))
             task_id_map[str(t['name'])] = id_counter
             id_counter = id_counter + 1
 
@@ -634,8 +636,20 @@ def main():
         task_sets = [task_set] #single set
         ce_chains = [chains] #single chain set
 
-        task_sets, chains = singleECUAnalysis(task_sets, ce_chains)
-
+        #task_sets, chains = singleECUAnalysis(task_sets, ce_chains)
+        schedules, task_sets, chains = scheduleSingleECUAnalysis(task_sets, ce_chains)
+        fo = open("output/schedule.txt", "w")
+        result = schedules[0].e2e_result()
+        for t in task_set:
+            parameters = result.get(t)
+            fo.write("Task: "+t.id+"\n")
+            for i in range(0, len(parameters)):
+                fo.write("j"+str(i)+" - " + "start: "+str(parameters[i][0]) + " end: " +str(parameters[i][1])+"\n")
+        fo.close()
+        
+        schedules[0].tableReport()
+        print("total miss rate: "+str(schedules[0].totalMissRate()))
+        
 def relink_chains(task_sets, chains):
     ce_chains = []
     for idxx in range(len(task_sets)):
@@ -649,7 +663,129 @@ def relink_chains(task_sets, chains):
             #interconnect not yet taken care of as focused on single ECU
 
     return ce_chains
+    
+def scheduleSingleECUAnalysis(task_sets, ce_chains):
+    ###
+    # First analyses (TDA, Davare, Duerr).
+    ###
+    print("=First analyses (TDA, Davare, Duerr).=")
+    analyzer = a.Analyzer("0")
 
+    try:
+        # TDA for each task set.
+        print("TDA.")
+        for idxx in range(len(task_sets)):
+            try:
+                # TDA.
+                i = 1
+                for task in task_sets[idxx]:
+                    # Prevent WCET = 0 since the scheduler can
+                    # not handle this yet. This case can occur due to
+                    # rounding with the transformer.
+                    if task.wcet == 0:
+                        raise ValueError("WCET == 0")
+                    task.rt = analyzer.tda(task, task_sets[idxx][:(i - 1)])
+                    if task.rt > task.deadline:
+                        raise ValueError(
+                                    "TDA Result: WCRT bigger than deadline!")
+                    i += 1
+            except ValueError:
+                # If TDA fails, remove task and chain set and continue.
+                task_sets.remove(task_sets[idxx])
+                ce_chains.remove(ce_chains[idxx])
+                continue
+             
+        # End-to-End Analyses. 
+        # These results are used to for schedule computation
+        res = analyzer.davare(ce_chains)
+        res = analyzer.reaction_duerr(ce_chains)
+        res = analyzer.age_duerr(ce_chains)
+
+
+        ###
+        # Second analyses (Simulation, Our, Kloda).
+        ###
+        print("=Second analyses (Simulation, Our, Kloda).=")
+        i = 0  # task set counter
+        schedules = []
+        for task_set in task_sets:
+            print("=Task set ", i+1)
+
+            # Skip if there is no corresponding cause-effect chain.
+            if len(ce_chains[i]) == 0:
+                continue
+
+            # Event-based simulation.
+            print("Simulation.")
+
+            simulator = es.eventSimulator(task_set)
+            # Determination of the variables used to compute the stop
+            # condition of the simulation
+            max_e2e_latency = max(ce_chains[i], key=lambda chain:
+                                      chain.davare).davare
+            max_phase = max(task_set, key=lambda task: task.phase).phase
+            max_period = max(task_set, key=lambda task: task.period).period
+            hyper_period = analyzer.determine_hyper_period(task_set)
+
+            sched_interval = (
+                        2 * hyper_period + max_phase  # interval from paper
+                        + max_e2e_latency  # upper bound job chain length
+                        + max_period)  # for convenience
+
+            # Information for end user.
+            print("\tNumber of tasks: ", len(task_set))
+            print("\tHyperperiod: ", hyper_period)
+            number_of_jobs = 0
+            for task in task_set:
+                number_of_jobs += sched_interval/task.period
+            print("\tNumber of jobs to schedule: ",
+                      "%.2f" % number_of_jobs)
+
+            # Stop condition: Number of jobs of lowest priority task.
+            simulator.dispatcher(
+                        int(math.ceil(sched_interval/task_set[-1].period)))
+
+            # Simulation without early completion.
+            schedules.append(simulator)
+
+            # Analyses.
+            #for chain in ce_chains[i]:
+            #    print("Test: Our Data Age.")
+            #    res = analyzer.max_age_our(schedule, task_set, chain, max_phase,
+            #                             hyper_period, reduced=False)
+            #    print("Our Data Age One:" + str(res))
+            #    res = analyzer.max_age_our(schedule, task_set, chain, max_phase,
+            #                             hyper_period, reduced=True)
+            #    print("Our Data Age Two:" + str(res))
+            #    print("Test: Our Reaction Time.")
+            #    res = analyzer.reaction_our(schedule, task_set, chain, max_phase,
+            #                              hyper_period)
+            #    print("Our Reaction Time:" + str(res))
+            #        # Kloda analysis, assuming synchronous releases.
+            #    print("Test: Kloda.")
+            #    res = analyzer.kloda(chain, hyper_period)
+            #    print("Kloda Analysis:" + str(res))
+            #        # Test.
+            #    if chain.kloda < chain.our_react:
+            #        if debug_flag:
+            #            breakpoint()
+            #        else:
+            #            raise ValueError(
+            #                        ".kloda is shorter than .our_react")
+            i += 1
+        return schedules,task_sets,ce_chains
+    except Exception as e:
+        print(e)
+        print("ERROR: analysis")
+        if debug_flag:
+            breakpoint()
+        else:
+            task_sets = []
+            ce_chains = []
+            
+    #1 task set will return 1 schedule.
+    return schedules,task_sets,ce_chains
+    
 def singleECUAnalysis(task_sets, ce_chains):
     ###
     # First analyses (TDA, Davare, Duerr).
