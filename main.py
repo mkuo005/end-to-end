@@ -500,6 +500,9 @@ def main():
         id_task_map = {} #to get original information back
         id_counter = 1 # reserved zero for system
         task_gcd_period = -1;
+
+        #Reject task where activation offset is non zero 
+        
         for t in system['TaskStore']:
             #task_set.append(Task.Task(task_id=id_counter, task_phase=int(t['initialOffset'] * unitscale), task_bcet=int(t['bcet']), task_wcet=int(t['wcet']), task_period=int(t['period']*unitscale), task_deadline=int(t['duration']*unitscale), priority=t['priority'], message=t['message']))
             task_set.append(Task.Task(task_id=id_counter, task_phase=int(t['initialOffset'] * unitscale), task_bcet=int(t['bcet']* unitscale), task_wcet=int(t['wcet']* unitscale), task_period=int(t['period']*unitscale), task_deadline=int(t['duration']*unitscale), priority=id_counter, message=False))
@@ -507,9 +510,9 @@ def main():
             id_task_map[str(id_counter)] = t
             id_counter = id_counter + 1
             if (task_gcd_period == -1):
-                task_gcd_period = t['period']*unitscale
+                task_gcd_period = int(t['period']*unitscale)
             else:
-                task_gcd_period = math.gcd(task_gcd_period,t['period']*unitscale)
+                task_gcd_period = math.gcd(task_gcd_period,int(t['period']*unitscale))
         
         
         #Create System Task for LetSynchronise
@@ -676,10 +679,10 @@ def main():
                 endtime = parameters[i][1]
                 taskInstance = {
                     "instance" : i,
-                    "periodStartTime" : i * t.period/unitscale,
-                    "letStartTime" : starttime/unitscale,
-                    "letEndTime" : endtime/unitscale,
-                    "periodEndTime" : (i+1) * t.period/unitscale,
+                    "periodStartTime" : (i * t.period+t.phase)/unitscale,
+                    "letStartTime" : (i * t.period+t.phase)/unitscale,
+                    "letEndTime" : (i * t.period+t.phase+t.deadline)/unitscale,
+                    "periodEndTime" : ((i+1) * t.period+t.phase)/unitscale,
                     "executionTime": (endtime-starttime)/unitscale,
                     "executionIntervals": [ {
                         "startTime": starttime/unitscale,
@@ -791,10 +794,17 @@ def export_letsSyncrhonise_json(task_sets, chains, id_task_map):
                     continue;
                 else:
                     dependencyName = "dep_"+str(chain.id)+"_"+str(previousTask.id)+"_"+str(task.id)
-                    dependencySourceTask =  id_task_map[str(previousTask.id)].get("name")
+                    if (id_task_map == None):
+                        dependencySourceTask = "task"+str(previousTask.id)
+                    else:
+                        dependencySourceTask =  id_task_map[str(previousTask.id)].get("name")
+                    
                     dependencySourcePort = "out"
                     
-                    dependencyDestTask = id_task_map[str(task.id)].get("name")
+                    if (id_task_map == None):
+                        dependencyDestTask = "task"+str(task.id)
+                    else:
+                        dependencyDestTask = id_task_map[str(task.id)].get("name")
                     dependencyDestPort = "in"
                     l_dependency = {
                          "name":dependencyName,
