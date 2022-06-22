@@ -427,8 +427,8 @@ def main():
             print("=Load data.=")
             #chains_single_ECU = []
             #chains_inter = []
-            #python main.py -j4 -g1 -u50 -n0
-            #python main.py -j4 -g0 -u50 -n0
+            #python main.py -j5 -g1 -u50 -n0
+            #python main.py -j5 -g0 -u50 -n0
             data = np.load(
                     "output/1single/task_set_" + "u=" + str(args.u)
                     + "_n=" + str(args.n) + "_g=" + str(args.g) + ".npz", allow_pickle=True)
@@ -504,6 +504,9 @@ def main():
         #Reject task where activation offset is non zero 
         
         for t in system['TaskStore']:
+            if (t['activationOffset'] != 0):
+                print("\n\nError this tool does not suppor tasks with activation offset.\n\n")
+                return
             #task_set.append(Task.Task(task_id=id_counter, task_phase=int(t['initialOffset'] * unitscale), task_bcet=int(t['bcet']), task_wcet=int(t['wcet']), task_period=int(t['period']*unitscale), task_deadline=int(t['duration']*unitscale), priority=t['priority'], message=t['message']))
             task_set.append(Task.Task(task_id=id_counter, task_phase=int(t['initialOffset'] * unitscale), task_bcet=int(t['bcet']* unitscale), task_wcet=int(t['wcet']* unitscale), task_period=int(t['period']*unitscale), task_deadline=int(t['duration']*unitscale), priority=id_counter, message=False))
             task_id_map[str(t['name'])] = id_counter
@@ -680,6 +683,8 @@ def main():
                 taskInstance = {
                     "instance" : i,
                     "periodStartTime" : (i * t.period+t.phase)/unitscale,
+                    #"letStartTime" : starttime/unitscale,
+                    #"letEndTime" : endtime/unitscale,
                     "letStartTime" : (i * t.period+t.phase)/unitscale,
                     "letEndTime" : (i * t.period+t.phase+t.deadline)/unitscale,
                     "periodEndTime" : ((i+1) * t.period+t.phase)/unitscale,
@@ -856,7 +861,15 @@ def export_letsSyncrhonise_json(task_sets, chains, id_task_map):
                         
                     previousTask = task;
             system["EventChainStore"].append(l_chain)
-            
+            l_constraint = {
+                "name" : "chain_"+str(chain.id)+"reaction_time",
+                "eventChain" : "chain_"+str(chain.id) ,
+                "relation" : "<=",
+                "time": chain.our_react/unitscale
+                
+                
+            }
+            system["ConstraintStore"].append(l_constraint);
     
     
     with open('output/LetSynchronise/system.json', 'w') as outfile:
