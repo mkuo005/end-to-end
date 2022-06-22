@@ -160,9 +160,19 @@ With the same machine as above, ```auto_runtime_jobs.sh 100``` is finished in le
 - To export the task sets to LetSynchronise (-j4) run ```python main.py -j4 -g0 -u50 -n0```.
 - The exported file will be in ```output/LetSynchronise/system.json```.
 
-## How to import from LetSynchronise
+## Load a single ECU system and perform the analysis
+- Using the -j5 argument, you can load a single ECU taskset in the npz format to perform the scheduling and end2end analysis
+- The arguments are the same as ```## How to export to LetSynchronise```
+- For example, ```python main.py -j5 -g1 -u50 -n0```
+
+## Compute the schuedle for a single core from LetSynchronise taskset
+- Export the LetsSyncrhonise JSON file or generate one using the steps in ```How to export to LetSynchronise```. 
+- Pass the LetsSyncrhonise JSON file to the tool using the -j6 argument. 
 - The format is -j6 -f (full path to LetsSyncrhonise JSON)
     - For example: ```python main.py -j6 -f output/LetSynchronise/system.json```
+- The result will be in the output folder
+    - "output\schedule.txt" is a human readable execution of task
+    - "output\system-schedule.json" is the LetsSyncrhonise JSON file containing both the taskset and the schedule of the tasks.
     
 ## How to use VM
 
