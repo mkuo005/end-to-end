@@ -6,6 +6,11 @@ It includes (1) local analysis (2) global analysis and (3) plotting of the
 results.
 """
 
+#Webserver API
+from http.server import BaseHTTPRequestHandler, HTTPServer # python3
+import socketserver 
+import time
+
 import gc  # garbage collector
 import argparse
 import math
@@ -26,6 +31,40 @@ import sys
 
 debug_flag = False  # flag to have breakpoint() when errors occur
 
+class end2endServer(BaseHTTPRequestHandler):
+    def do_OPTIONS(self):
+        self.send_response(200, "ok")
+        self.send_header('Access-Control-Allow-Methods', 'GET, OPTIONS, POST')
+        self.send_header("Access-Control-Allow-Headers", "X-Requested-With")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.end_headers()
+        
+    def end_headers (self):
+        self.send_header('Access-Control-Allow-Origin', '*')
+        BaseHTTPRequestHandler.end_headers(self)
+        
+    def _set_headers(self):
+        self.send_response(200)
+        #self.send_header('Content-type', 'text/html')
+        self.send_header('Content-Type', 'application/json')
+        self.end_headers()
+        
+    def do_GET(self):
+        self._set_headers()
+        self.wfile.write("received get request")
+        
+    def do_POST(self):
+        '''Reads post request body'''
+        self._set_headers()
+        content_len = int(self.headers.get('content-length'))
+        post_body = self.rfile.read(content_len)
+        print(post_body)
+        system = json.loads(post_body.decode("utf-8"))
+        schedule = scheduleLetSynchronise(system)
+        self.wfile.write(bytes(json.dumps(schedule),"utf-8"))
+
+    def do_PUT(self):
+        self.do_POST();
 
 def main():
     """Main Function."""
@@ -59,7 +98,21 @@ def main():
         os.makedirs('output/3plots');
     if (not os.path.exists('output/LetSynchronise')):
         os.makedirs('output/LetSynchronise');
-    if args.j == 1:
+        
+    if args.j == 0: #uses a webserver for scheduling calls
+        hostName = "localhost"
+        serverPort = 8080
+        webServer = HTTPServer((hostName, serverPort), end2endServer)
+        print("Server started http://%s:%s" % (hostName, serverPort))
+
+        try:
+            webServer.serve_forever()
+        except KeyboardInterrupt:
+            pass
+
+        webServer.server_close()
+        print("Server stopped.")
+    elif args.j == 1:
         """Single ECU analysis.
 
         Required arguments:
@@ -485,7 +538,7 @@ def main():
             else:
                 return
     elif args.j == 6:
-        unitscale = 1000000
+        
         if (len(args.f) == 0):
             print("Please specify input LetSynchronise json")
             return 0;
@@ -493,228 +546,233 @@ def main():
         #f = open('output/LetSynchronise/system.json')
         f = open(args.f)
         system = json.load(f)
-        #"ConstraintStore" , "DependencyStore", "EventChainStore", "SystemInputStore", "SystemOutputStore", "TaskStore" 
-        task_set = []
-        chains = []
-        task_id_map = {}
-        id_task_map = {} #to get original information back
-        id_counter = 1 # reserved zero for system
-        task_gcd_period = -1;
+        scheduleLetSynchronise(system)
 
-        #Reject task where activation offset is non zero 
-        
-        for t in system['TaskStore']:
-            if (t['activationOffset'] != 0):
-                print("\n\nError this tool does not suppor tasks with activation offset.\n\n")
-                return
-            #task_set.append(Task.Task(task_id=id_counter, task_phase=int(t['initialOffset'] * unitscale), task_bcet=int(t['bcet']), task_wcet=int(t['wcet']), task_period=int(t['period']*unitscale), task_deadline=int(t['duration']*unitscale), priority=t['priority'], message=t['message']))
-            task_set.append(Task.Task(task_id=id_counter, task_phase=int(t['initialOffset'] * unitscale), task_bcet=int(t['bcet']* unitscale), task_wcet=int(t['wcet']* unitscale), task_period=int(t['period']*unitscale), task_deadline=int(t['duration']*unitscale), priority=id_counter, message=False))
-            task_id_map[str(t['name'])] = id_counter
-            id_task_map[str(id_counter)] = t
-            id_counter = id_counter + 1
-            if (task_gcd_period == -1):
-                task_gcd_period = int(t['period']*unitscale)
-            else:
-                task_gcd_period = math.gcd(task_gcd_period,int(t['period']*unitscale))
-        
-        
-        #Create System Task for LetSynchronise
-        id_counter = 0
-        task_id_map["__system"] = id_counter
-        #wcet is smallest non-zero value
-        task_set.insert(0,Task.Task(task_id=id_counter, task_phase=0, task_bcet=0, task_wcet=sys.float_info.min, task_period=task_gcd_period, task_deadline=task_gcd_period, priority=id_counter, message=False))
-        id_task_map[str(id_counter)] = {"name":"__system"}
-        
-        print (id_task_map)
-        
-        id_counter = 0
-        for c in system['EventChainStore']:
-            chain = []
-            successor = c.get('successor')
-            #print(c)
-            #print("-------------------------")
-            #print(c.get('segment').get('source').get('task'))
-            #print(task_id_map.get(c.get('segment').get('source').get('task')))
-            chain.append(task_set[task_id_map.get(c.get('segment').get('source').get('task'))])
-            chain.append(task_set[task_id_map.get(c.get('segment').get('destination').get('task'))])
-            while(successor != None):
-                chain.append(task_set[task_id_map.get(successor.get('segment').get('destination').get('task'))])
-                successor = successor.get('successor')
-            chains.append(Chain.CauseEffectChain(id = id_counter, chain=chain, interconnected=[]))
-            id_counter = id_counter + 1
+def scheduleLetSynchronise(system):
+    unitscale = 1000000
+    #"ConstraintStore" , "DependencyStore", "EventChainStore", "SystemInputStore", "SystemOutputStore", "TaskStore" 
+    task_set = []
+    chains = []
+    task_id_map = {}
+    id_task_map = {} #to get original information back
+    id_counter = 1 # reserved zero for system
+    task_gcd_period = -1;
 
-        for t in task_set:
-            print(t)
-        print("===Begin analysis===")
-        task_sets = [task_set] #single set
-        ce_chains = [chains] #single chain set
+    #Reject task where activation offset is non zero 
+    
+    for t in system['TaskStore']:
+        if (t['activationOffset'] != 0):
+            print("\n\nError this tool does not suppor tasks with activation offset.\n\n")
+            return system;
+        #task_set.append(Task.Task(task_id=id_counter, task_phase=int(t['initialOffset'] * unitscale), task_bcet=int(t['bcet']), task_wcet=int(t['wcet']), task_period=int(t['period']*unitscale), task_deadline=int(t['duration']*unitscale), priority=t['priority'], message=t['message']))
+        task_set.append(Task.Task(task_id=id_counter, task_phase=int(t['initialOffset'] * unitscale), task_bcet=int(t['bcet']* unitscale), task_wcet=int(t['wcet']* unitscale), task_period=int(t['period']*unitscale), task_deadline=int(t['duration']*unitscale), priority=id_counter, message=False))
+        task_id_map[str(t['name'])] = id_counter
+        id_task_map[str(id_counter)] = t
+        id_counter = id_counter + 1
+        if (task_gcd_period == -1):
+            task_gcd_period = int(t['period']*unitscale)
+        else:
+            task_gcd_period = math.gcd(task_gcd_period,int(t['period']*unitscale))
+    
+    
+    #Create System Task for LetSynchronise
+    id_counter = 0
+    task_id_map["__system"] = id_counter
+    #wcet is smallest non-zero value
+    task_set.insert(0,Task.Task(task_id=id_counter, task_phase=0, task_bcet=0, task_wcet=sys.float_info.min, task_period=task_gcd_period, task_deadline=task_gcd_period, priority=id_counter, message=False))
+    id_task_map[str(id_counter)] = {"name":"__system"}
+    
+    print (id_task_map)
+    
+    id_counter = 0
+    for c in system['EventChainStore']:
+        chain = []
+        successor = c.get('successor')
+        #print(c)
+        #print("-------------------------")
+        #print(c.get('segment').get('source').get('task'))
+        #print(task_id_map.get(c.get('segment').get('source').get('task')))
+        chain.append(task_set[task_id_map.get(c.get('segment').get('source').get('task'))])
+        chain.append(task_set[task_id_map.get(c.get('segment').get('destination').get('task'))])
+        while(successor != None):
+            chain.append(task_set[task_id_map.get(successor.get('segment').get('destination').get('task'))])
+            successor = successor.get('successor')
+        chains.append(Chain.CauseEffectChain(id = id_counter, chain=chain, interconnected=[]))
+        id_counter = id_counter + 1
 
-        #task_sets, chains = singleECUAnalysis(task_sets, ce_chains)
-        schedules, task_sets, chains = scheduleSingleECUAnalysis(task_sets, ce_chains)
-        fo = open("output/schedule.txt", "w")
-        result = schedules[0].e2e_result()
+    for t in task_set:
+        print(t)
+    print("===Begin analysis===")
+    task_sets = [task_set] #single set
+    ce_chains = [chains] #single chain set
+
+    #task_sets, chains = singleECUAnalysis(task_sets, ce_chains)
+    schedules, task_sets, chains = scheduleSingleECUAnalysis(task_sets, ce_chains)
+    fo = open("output/schedule.txt", "w")
+    result = schedules[0].e2e_result()
+    
+    #Dependency Instance
+    #"name": "alpha",
+    #"value": [
+    #{
+    #  "instance": 0,
+    #  "receiveEvent": {
+    #    "task": "task-a",
+    #    "port": "in",
+    #    "taskInstance": 0,
+    #    "timestamp": 1
+    #  },
+    #  "sendEvent": {
+    #    "task": "__system",
+    #    "port": "SystemInput",
+    #    "taskInstance": 0,
+    #    "timestamp": 1
+    #  }
+    #},
+    #...
+    #]
+    
+    #{
+    #  "segment": {
+    #    "name": "alpha",
+    #    "instance": 0,
+    #    "receiveEvent": {
+    #      "task": "task-a",
+    #      "port": "in",
+    #      "taskInstance": 0,
+    #      "timestamp": 1
+    #    },
+    #    "sendEvent": {
+    #      "task": "__system",
+    #      "port": "SystemInput",
+    #      "taskInstance": 0,
+    #      "timestamp": 1
+    #    }
+    #  },
+    #  "name": "EventChain1-0",
+    #  "successor": {
+    #    "segment": {
+    #      "name": "beta",
+    #      "instance": 1,
+    #      "receiveEvent": {
+    #        "task": "task-c",
+    #        "port": "in1",
+    #        "taskInstance": 1,
+    #        "timestamp": 3
+    #      },
+    #      "sendEvent": {
+    #        "task": "task-a",
+    #        "port": "out",
+    #        "taskInstance": 0,
+    #        "timestamp": 3
+    #      }
+    #    },
+    #    "successor": {
+    #      "segment": {
+    #        "name": "delta",
+    #        "instance": 1,
+    #        "receiveEvent": {
+    #          "task": "__system",
+    #          "port": "SystemOutput",
+    #          "taskInstance": 1,
+    #          "timestamp": 4
+    #        },
+    #        "sendEvent": {
+    #          "task": "task-c",
+    #          "port": "out",
+    #          "taskInstance": 1,
+    #          "timestamp": 4
+    #        }
+    #      }
+    #    }
+    #  }
+    #}
+    
+    #Task Instance
+    
+    #"name": "task-a",
+    #"initialOffset": 0,
+    #"value": [
+    #{
+    #  "instance": 0,
+    #  "periodStartTime": 0,
+    #  "letStartTime": 1,
+    #  "letEndTime": 3,
+    #  "periodEndTime": 3,
+    #  "executionTime": 0.9478027315786561,
+    #  "executionIntervals": [
+    #    {
+    #      "startTime": 1,
+    #      "endTime": 1.473901365789328
+    #    },
+    #    {
+    #      "startTime": 2.5260986342106717,
+    #      "endTime": 3
+    #    }
+    #  ]
+    #},
+    #...
+    #]
+    
+   
+    
+    #export schedule
+    schedule = {
+        "DependencyInstancesStore" : [], 
+        "EventChainInstanceStore" : [],
+        "TaskInstancesStore" : []
+        }
         
-        #Dependency Instance
-        #"name": "alpha",
-        #"value": [
-        #{
-        #  "instance": 0,
-        #  "receiveEvent": {
-        #    "task": "task-a",
-        #    "port": "in",
-        #    "taskInstance": 0,
-        #    "timestamp": 1
-        #  },
-        #  "sendEvent": {
-        #    "task": "__system",
-        #    "port": "SystemInput",
-        #    "taskInstance": 0,
-        #    "timestamp": 1
-        #  }
-        #},
-        #...
-        #]
-        
-        #{
-        #  "segment": {
-        #    "name": "alpha",
-        #    "instance": 0,
-        #    "receiveEvent": {
-        #      "task": "task-a",
-        #      "port": "in",
-        #      "taskInstance": 0,
-        #      "timestamp": 1
-        #    },
-        #    "sendEvent": {
-        #      "task": "__system",
-        #      "port": "SystemInput",
-        #      "taskInstance": 0,
-        #      "timestamp": 1
-        #    }
-        #  },
-        #  "name": "EventChain1-0",
-        #  "successor": {
-        #    "segment": {
-        #      "name": "beta",
-        #      "instance": 1,
-        #      "receiveEvent": {
-        #        "task": "task-c",
-        #        "port": "in1",
-        #        "taskInstance": 1,
-        #        "timestamp": 3
-        #      },
-        #      "sendEvent": {
-        #        "task": "task-a",
-        #        "port": "out",
-        #        "taskInstance": 0,
-        #        "timestamp": 3
-        #      }
-        #    },
-        #    "successor": {
-        #      "segment": {
-        #        "name": "delta",
-        #        "instance": 1,
-        #        "receiveEvent": {
-        #          "task": "__system",
-        #          "port": "SystemOutput",
-        #          "taskInstance": 1,
-        #          "timestamp": 4
-        #        },
-        #        "sendEvent": {
-        #          "task": "task-c",
-        #          "port": "out",
-        #          "taskInstance": 1,
-        #          "timestamp": 4
-        #        }
-        #      }
-        #    }
-        #  }
-        #}
-        
-        #Task Instance
-        
-        #"name": "task-a",
-        #"initialOffset": 0,
-        #"value": [
-        #{
-        #  "instance": 0,
-        #  "periodStartTime": 0,
-        #  "letStartTime": 1,
-        #  "letEndTime": 3,
-        #  "periodEndTime": 3,
-        #  "executionTime": 0.9478027315786561,
-        #  "executionIntervals": [
-        #    {
-        #      "startTime": 1,
-        #      "endTime": 1.473901365789328
-        #    },
-        #    {
-        #      "startTime": 2.5260986342106717,
-        #      "endTime": 3
-        #    }
-        #  ]
-        #},
-        #...
-        #]
-        
-       
-        
-        #export schedule
-        schedule = {
-            "DependencyInstancesStore" : [], 
-            "EventChainInstanceStore" : [],
-            "TaskInstancesStore" : []
+    for t in task_set:
+        parameters = result.get(t)
+        fo.write("Task: "+t.id+"\n")
+        taskInstancesJson = {
+            "name" : id_task_map[str(t.id)].get("name"),
+            "initialOffset" : 0,
+        }
+        instances = []
+        for i in range(0, len(parameters)):
+            fo.write("j"+str(i)+" - " + "start: "+str(parameters[i][0]) + " end: " +str(parameters[i][1])+"\n")
+            starttime = parameters[i][0]
+            if (starttime == sys.float_info.min):
+                starttime = 0
+            endtime = parameters[i][1]
+            taskInstance = {
+                "instance" : i,
+                "periodStartTime" : (i * t.period+t.phase)/unitscale,
+                #"letStartTime" : starttime/unitscale,
+                #"letEndTime" : endtime/unitscale,
+                "letStartTime" : (i * t.period+t.phase)/unitscale,
+                "letEndTime" : (i * t.period+t.phase+t.deadline)/unitscale,
+                "periodEndTime" : ((i+1) * t.period+t.phase)/unitscale,
+                "executionTime": (endtime-starttime)/unitscale,
+                "executionIntervals": [ {
+                    "startTime": starttime/unitscale,
+                    "endTime": endtime/unitscale
+                } ]
             }
-            
-        for t in task_set:
-            parameters = result.get(t)
-            fo.write("Task: "+t.id+"\n")
-            taskInstancesJson = {
-                "name" : id_task_map[str(t.id)].get("name"),
-                "initialOffset" : 0,
-            }
-            instances = []
-            for i in range(0, len(parameters)):
-                fo.write("j"+str(i)+" - " + "start: "+str(parameters[i][0]) + " end: " +str(parameters[i][1])+"\n")
-                starttime = parameters[i][0]
-                if (starttime == sys.float_info.min):
-                    starttime = 0
-                endtime = parameters[i][1]
-                taskInstance = {
-                    "instance" : i,
-                    "periodStartTime" : (i * t.period+t.phase)/unitscale,
-                    #"letStartTime" : starttime/unitscale,
-                    #"letEndTime" : endtime/unitscale,
-                    "letStartTime" : (i * t.period+t.phase)/unitscale,
-                    "letEndTime" : (i * t.period+t.phase+t.deadline)/unitscale,
-                    "periodEndTime" : ((i+1) * t.period+t.phase)/unitscale,
-                    "executionTime": (endtime-starttime)/unitscale,
-                    "executionIntervals": [ {
-                        "startTime": starttime/unitscale,
-                        "endTime": endtime/unitscale
-                    } ]
-                }
-                instances.append(taskInstance)
-            taskInstancesJson["value"] = instances
-            if (id_task_map[str(t.id)].get("name") != "__system"):
-                schedule["TaskInstancesStore"].append(taskInstancesJson)
-            
-        fo.close()
+            instances.append(taskInstance)
+        taskInstancesJson["value"] = instances
+        if (id_task_map[str(t.id)].get("name") != "__system"):
+            schedule["TaskInstancesStore"].append(taskInstancesJson)
         
-        
-        schedule.update(system)
-        
-        
-        with open('output/LetSynchronise/system-schedule.json', 'w') as outfile:
-            json.dump(schedule, outfile, indent=4)
-        schedules[0].tableReport()
-        print("RESULTS!!")
-        print(result)
-        print("total miss rate: "+str(schedules[0].totalMissRate()))
-        
-        #export system
-        #exporting the system is not good because it loses too much information therefore we will use the same system file.
-        #export_letsSyncrhonise_json(task_sets, chains, id_task_map)
+    fo.close()
+    
+    
+    schedule.update(system)
+    
+    
+    with open('output/LetSynchronise/system-schedule.json', 'w') as outfile:
+        json.dump(schedule, outfile, indent=4)
+    schedules[0].tableReport()
+    print("RESULTS!!")
+    print(result)
+    print("total miss rate: "+str(schedules[0].totalMissRate()))
+    
+    #export system
+    #exporting the system is not good because it loses too much information therefore we will use the same system file.
+    #export_letsSyncrhonise_json(task_sets, chains, id_task_map)
+    return schedule
         
 
 def export_letsSyncrhonise_json(task_sets, chains, id_task_map):
