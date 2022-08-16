@@ -48,20 +48,29 @@ class end2endServer(BaseHTTPRequestHandler):
         #self.send_header('Content-type', 'text/html')
         self.send_header('Content-Type', 'application/json')
         self.end_headers()
-        
+    def _set_error_headers(self):
+        self.send_response(501)
+        self.send_header('Content-type', 'text/html')
+
+        self.end_headers()
     def do_GET(self):
         self._set_headers()
         self.wfile.write("received get request")
         
     def do_POST(self):
         '''Reads post request body'''
-        self._set_headers()
+        #self._set_headers()
         content_len = int(self.headers.get('content-length'))
         post_body = self.rfile.read(content_len)
         print(post_body)
         system = json.loads(post_body.decode("utf-8"))
         schedule = scheduleLetSynchronise(system)
-        self.wfile.write(bytes(json.dumps(schedule),"utf-8"))
+        if (schedule == None):
+            #self.send_response(501, "Scheduler does not support LET parameters")
+            self._set_error_headers()
+        else:
+            self._set_headers()
+            self.wfile.write(bytes(json.dumps(schedule),"utf-8"))
 
     def do_PUT(self):
         self.do_POST();
@@ -563,7 +572,7 @@ def scheduleLetSynchronise(system):
     for t in system['TaskStore']:
         if (t['activationOffset'] != 0):
             print("\n\nError this tool does not suppor tasks with activation offset.\n\n")
-            return system;
+            return None;
         #task_set.append(Task.Task(task_id=id_counter, task_phase=int(t['initialOffset'] * unitscale), task_bcet=int(t['bcet']), task_wcet=int(t['wcet']), task_period=int(t['period']*unitscale), task_deadline=int(t['duration']*unitscale), priority=t['priority'], message=t['message']))
         task_set.append(Task.Task(task_id=id_counter, task_phase=int(t['initialOffset'] * unitscale), task_bcet=int(t['bcet']* unitscale), task_wcet=int(t['wcet']* unitscale), task_period=int(t['period']*unitscale), task_deadline=int(t['duration']*unitscale), priority=id_counter, message=False))
         task_id_map[str(t['name'])] = id_counter
@@ -757,7 +766,6 @@ def scheduleLetSynchronise(system):
             schedule["TaskInstancesStore"].append(taskInstancesJson)
         
     fo.close()
-    
     
     schedule.update(system)
     
