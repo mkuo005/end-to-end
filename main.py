@@ -30,7 +30,7 @@ import utilities.chain as Chain
 import sys
 
 debug_flag = False  # flag to have breakpoint() when errors occur
-
+unitscale = 1
 class end2endServer(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
         self.send_response(200, "ok")
@@ -571,7 +571,7 @@ def getNextDependencyInstance(system, dependencyInstName, afterTime):
     return None  
     
 def scheduleLetSynchronise(system):
-    unitscale = 1000000
+    
     #"ConstraintStore" , "DependencyStore", "EventChainStore", "SystemInputStore", "SystemOutputStore", "TaskStore" 
     task_set = []
     chains = []
@@ -913,7 +913,7 @@ def scheduleLetSynchronise(system):
         
 
 def export_letsSyncrhonise_json(task_sets, chains, id_task_map):
-    unitscale = 1000000
+    
     #LetSynchronise data structure
     system = {
         "ConstraintStore" : [], 
