@@ -465,8 +465,9 @@ def main():
             task_sets = data.f.task_sets
             chains = data.f.chains
             
-            export_letsSyncrhonise_json(task_sets, chains, None)
-            
+            system = export_letsSyncrhonise_json(task_sets, chains, None)
+            with open('output/LetSynchronise/system.json', 'w') as outfile:
+                json.dump(system, outfile, indent=4)
                 # Interconnected.
             #for chain in data.f.chains_inter:
             #    chains_inter.append(chain)
@@ -556,7 +557,19 @@ def main():
         f = open(args.f)
         system = json.load(f)
         scheduleLetSynchronise(system)
-
+def getDependencyInstances(system, name):
+    for d in system["DependencyInstancesStore"]: 
+        if d['name'] == name:
+            return d;
+    return None  
+    
+def getNextDependencyInstance(system, dependencyInstName, afterTime):
+    instances = getDependencyInstances(system, dependencyInstName)
+    for inst in instances['value']:
+        if (inst['sendEvent']['timestamp'] >=  afterTime):
+            return inst
+    return None  
+    
 def scheduleLetSynchronise(system):
     unitscale = 1000000
     #"ConstraintStore" , "DependencyStore", "EventChainStore", "SystemInputStore", "SystemOutputStore", "TaskStore" 
@@ -617,6 +630,12 @@ def scheduleLetSynchronise(system):
 
     #task_sets, chains = singleECUAnalysis(task_sets, ce_chains)
     schedules, task_sets, chains = scheduleSingleECUAnalysis(task_sets, ce_chains)
+    
+
+    
+    print("---debug----")
+    print(schedules)
+    
     fo = open("output/schedule.txt", "w")
     result = schedules[0].e2e_result()
     
@@ -766,20 +785,130 @@ def scheduleLetSynchronise(system):
             schedule["TaskInstancesStore"].append(taskInstancesJson)
         
     fo.close()
+    #export system
+    export = export_letsSyncrhonise_json(task_sets, chains, id_task_map)
     
-    schedule.update(system)
+    #compute dependencyInstance 
+    export['DependencyInstancesStore'] = []
+    for dep in system['DependencyStore']:
+        dependencyInstance = {}
+        dependencyInstance['name'] = dep['name'];
+        instances = []
+        for destTaskInsts in schedule["TaskInstancesStore"]:
+            if destTaskInsts['name'] == dep['destination']['task']:
+                for destTaskInst in destTaskInsts["value"]:
+                    for srcTaskInsts in schedule["TaskInstancesStore"]:
+                        if dep['source']['task'] == "__system": 
+                            instance = {
+                               "instance":destTaskInst['instance'],
+                               "receiveEvent":{
+                                  "task":dep['destination']['task'],
+                                  "port":dep['destination']['port'],
+                                  "taskInstance":destTaskInst['instance'],
+                                  "timestamp":destTaskInst['letStartTime']
+                               },
+                               "sendEvent":{
+                                  "task":dep['source']['task'],
+                                  "port":dep['source']['port'],
+                                  "taskInstance":destTaskInst['instance'],
+                                  "timestamp":destTaskInst['letStartTime'] #system have same instance and time
+                               }
+                            }
+                            instances.append(instance);
+                        if srcTaskInsts['name'] == dep['source']['task']:
+                            closestSrcInst = srcTaskInsts["value"][0]
+                            minTimeDiff = float('inf') 
+                            for srcTaskInst in srcTaskInsts["value"]:
+                                if (destTaskInst['letStartTime'] - srcTaskInst['letEndTime'] >= 0): #has to be positive
+                                    if (minTimeDiff < destTaskInst['letStartTime'] - srcTaskInst['letEndTime']):
+                                        minTimeDiff = destTaskInst['letStartTime'] - srcTaskInst['letEndTime']
+                                        closestSrcInst = srcTaskInst
+                                    
+                            instance = {
+                               "instance":destTaskInst['instance'],
+                               "receiveEvent":{
+                                  "task":dep['destination']['task'],
+                                  "port":dep['destination']['port'],
+                                  "taskInstance":destTaskInst['instance'],
+                                  "timestamp":destTaskInst['letStartTime']
+                               },
+                               "sendEvent":{
+                                  "task":dep['source']['task'],
+                                  "port":dep['source']['port'],
+                                  "taskInstance":closestSrcInst['instance'],
+                                  "timestamp":closestSrcInst['letStartTime']
+                               }
+                            }
+                            
+                            instances.append(instance);
+        dependencyInstance['value'] = instances;
+        export['DependencyInstancesStore'].append(dependencyInstance)
+
+    #compute eventChainInstance
+    export['EventChainInstanceStore'] = []
+    for c in system['EventChainStore']:
+        
+        dependencyInstances = getDependencyInstances(system, c["segment"]["name"])
+        i = 0
+        for dependencyInst in dependencyInstances['value']:
+            successor = c.get('successor')
+            
+            complete = True
+            evtChainInst = {}
+            evtChainInst["name"] = c["name"]+"-"+str(i)
+            evtChainInst["segment"] = dependencyInst
+            evtChainInst["segment"]["name"] = dependencyInstances["name"]
+            #current successor
+            current = evtChainInst
+            
+            while(successor != None):
+                #find closest successor instance
+                afterTime = evtChainInst["segment"]["receiveEvent"]["timestamp"]
+                for t in system['TaskStore']:
+                    if t['name'] == current["segment"]["receiveEvent"]["task"]:
+                        afterTime = afterTime + t["duration"]
+                result = getNextDependencyInstance(system, successor["segment"]["name"], evtChainInst["segment"]["receiveEvent"]["timestamp"])
+                if (result == None):
+                    #print ("XX")
+                    #exit(0)
+                    complete = False
+                    break
+                    
+                #assign as successor
+                current["successor"] = {}
+                current["successor"]["segment"] = result
+                current["successor"]["segment"]["name"] = successor["segment"]["name"]
+                current = current["successor"]
+                successor = successor.get('successor')
+            if complete:    
+                export['EventChainInstanceStore'].append(evtChainInst)
+            i = i + 1
+        
+        
+
+    #print(export['ConstraintStore'])
+    #print("Xxxxxxx");
+    #exit(0);
+    
+    #As export does a backward conversion from end-to-end format, it loses information so its best to use original information.
+    export['SystemInputStore'] = system['SystemInputStore']
+    export['SystemOutputStore'] = system['SystemOutputStore']
+    export['TaskStore'] = system['TaskStore']
+    schedule.update(export)
+    
+    
     
     
     with open('output/LetSynchronise/system-schedule.json', 'w') as outfile:
         json.dump(schedule, outfile, indent=4)
+    print("RESULTS!!")
     schedules[0].tableReport()
     print("RESULTS!!")
     print(result)
     print("total miss rate: "+str(schedules[0].totalMissRate()))
+    #print(schedule['ConstraintStore'])
     
-    #export system
-    #exporting the system is not good because it loses too much information therefore we will use the same system file.
-    #export_letsSyncrhonise_json(task_sets, chains, id_task_map)
+    #
     return schedule
         
 
@@ -938,8 +1067,7 @@ def export_letsSyncrhonise_json(task_sets, chains, id_task_map):
             system["ConstraintStore"].append(l_constraint);
     
     
-    with open('output/LetSynchronise/system.json', 'w') as outfile:
-        json.dump(system, outfile, indent=4)
+    return system;
         
 def relink_chains(task_sets, chains):
     ce_chains = []
@@ -1035,35 +1163,38 @@ def scheduleSingleECUAnalysis(task_sets, ce_chains):
             # Stop condition: Number of jobs of lowest priority task.
             simulator.dispatcher(
                         int(math.ceil(sched_interval/task_set[-1].period)))
-
+            
             # Simulation without early completion.
-            schedules.append(simulator)
+            schedule = simulator.e2e_result()
+            schedules.append(simulator) #output raw simulator
 
             # Analyses.
-            #for chain in ce_chains[i]:
-            #    print("Test: Our Data Age.")
-            #    res = analyzer.max_age_our(schedule, task_set, chain, max_phase,
-            #                             hyper_period, reduced=False)
-            #    print("Our Data Age One:" + str(res))
-            #    res = analyzer.max_age_our(schedule, task_set, chain, max_phase,
-            #                             hyper_period, reduced=True)
-            #    print("Our Data Age Two:" + str(res))
-            #    print("Test: Our Reaction Time.")
-            #    res = analyzer.reaction_our(schedule, task_set, chain, max_phase,
-            #                              hyper_period)
-            #    print("Our Reaction Time:" + str(res))
-            #        # Kloda analysis, assuming synchronous releases.
-            #    print("Test: Kloda.")
-            #    res = analyzer.kloda(chain, hyper_period)
-            #    print("Kloda Analysis:" + str(res))
-            #        # Test.
-            #    if chain.kloda < chain.our_react:
-            #        if debug_flag:
-            #            breakpoint()
-            #        else:
-            #            raise ValueError(
-            #                        ".kloda is shorter than .our_react")
+            for chain in ce_chains[i]:
+                print("Test: Our Data Age.")
+                analyzer.max_age_our(schedule, task_set, chain, max_phase,
+                                     hyper_period, reduced=False)
+                analyzer.max_age_our(schedule, task_set, chain, max_phase,
+                                     hyper_period, reduced=True)
+
+                print("Test: Our Reaction Time.")
+                analyzer.reaction_our(schedule, task_set, chain, max_phase,
+                                      hyper_period)
+
+                # Kloda analysis, assuming synchronous releases.
+                print("Test: Kloda.")
+                analyzer.kloda(chain, hyper_period)
+
+                # Test.
+                if chain.kloda < chain.our_react:
+                    if debug_flag:
+                        breakpoint()
+                    else:
+                        raise ValueError(
+                                ".kloda is shorter than .our_react")
             i += 1
+
+        
+
         return schedules,task_sets,ce_chains
     except Exception as e:
         print(e)
@@ -1167,7 +1298,7 @@ def singleECUAnalysis(task_sets, ce_chains):
 
             # Simulation without early completion.
             schedule = simulator.e2e_result()
-            schedules.append(schedule)
+            schedules.append(schedule) #output raw simulator
 
             # Analyses.
             for chain in ce_chains[i]:
