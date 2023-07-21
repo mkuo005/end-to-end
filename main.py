@@ -895,7 +895,8 @@ def scheduleLetSynchronise(system):
     export['SystemOutputStore'] = system['SystemOutputStore']
     export['TaskStore'] = system['TaskStore']
     schedule.update(export)
-    
+    schedule['DependencyStore'] = system['DependencyStore'] #restore missing information since end-to-end does not have this information
+    schedule['EventChainStore'] = system['EventChainStore'] #restore missing information since end-to-end does not have this information
     
     
     
@@ -993,7 +994,7 @@ def export_letsSyncrhonise_json(task_sets, chains, id_task_map):
                     first = False
                     continue;
                 else:
-                    dependencyName = "dep_"+str(chain.id)+"_"+str(previousTask.id)+"_"+str(task.id)
+                    dependencyName = "dep_"+str(chain.id)+"_"+str(previousTask.id)+"_"+str(task.id) #create dependencies again as end-to-end does not have this information
                     if (id_task_map == None):
                         dependencySourceTask = "task"+str(previousTask.id)
                     else:
@@ -1017,7 +1018,7 @@ def export_letsSyncrhonise_json(task_sets, chains, id_task_map):
                             "port":dependencyDestPort
                          }
                     }
-                    system["DependencyStore"].append(l_dependency)
+                    system["DependencyStore"].append(l_dependency) #create missing information from model
                     
                     #event chain
                     if second:
