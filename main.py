@@ -10,7 +10,7 @@ results.
 from http.server import BaseHTTPRequestHandler, HTTPServer # python3
 import socketserver 
 import time
-
+import random
 import gc  # garbage collector
 import argparse
 import math
@@ -28,6 +28,7 @@ import os
 import utilities.task as Task
 import utilities.chain as Chain
 import sys
+import traceback
 
 debug_flag = False  # flag to have breakpoint() when errors occur
 unitscale = 1
@@ -48,8 +49,8 @@ class end2endServer(BaseHTTPRequestHandler):
         #self.send_header('Content-type', 'text/html')
         self.send_header('Content-Type', 'application/json')
         self.end_headers()
-    def _set_error_headers(self):
-        self.send_response(501)
+    def _set_error_headers(self, text):
+        self.send_response(500, "\""+str(text)+"\"")
         self.send_header('Content-type', 'text/html')
 
         self.end_headers()
@@ -58,20 +59,27 @@ class end2endServer(BaseHTTPRequestHandler):
         self.wfile.write("received get request")
         
     def do_POST(self):
-        '''Reads post request body'''
-        #self._set_headers()
-        content_len = int(self.headers.get('content-length'))
-        post_body = self.rfile.read(content_len)
-        print(post_body)
-        system = json.loads(post_body.decode("utf-8"))
-        schedule = scheduleLetSynchronise(system)
-        if (schedule == None):
-            #self.send_response(501, "Scheduler does not support LET parameters")
-            self._set_error_headers()
-        else:
-            self._set_headers()
-            self.wfile.write(bytes(json.dumps(schedule),"utf-8"))
-
+        try:
+            '''Reads post request body'''
+            #self._set_headers()
+            content_len = int(self.headers.get('content-length'))
+            post_body = self.rfile.read(content_len)
+            print(post_body)
+            system = json.loads(post_body.decode("utf-8"))
+            if (len(system.get("TaskStore")) == 0):
+                self._set_error_headers("No tasks in the system")
+            elif (len(system.get("DependencyStore")) == 0):
+                self._set_error_headers("No dependencies in the system")
+            else:
+                schedule = scheduleLetSynchronise(system)
+                if (schedule == None):
+                    self._set_error_headers("Schedule is empty")
+                else:
+                    self._set_headers()
+                    self.wfile.write(bytes(json.dumps(schedule),"utf-8"))
+        except Exception:    
+            self._set_error_headers("Schedule cannot be generated due to scheduling error")
+            print(traceback.format_exc())
     def do_PUT(self):
         self.do_POST();
 
@@ -587,7 +595,16 @@ def scheduleLetSynchronise(system):
             print("\n\nError this tool does not suppor tasks with activation offset.\n\n")
             return None;
         #task_set.append(Task.Task(task_id=id_counter, task_phase=int(t['initialOffset'] * unitscale), task_bcet=int(t['bcet']), task_wcet=int(t['wcet']), task_period=int(t['period']*unitscale), task_deadline=int(t['duration']*unitscale), priority=t['priority'], message=t['message']))
-        task_set.append(Task.Task(task_id=id_counter, task_phase=int(t['initialOffset'] * unitscale), task_bcet=int(t['bcet']* unitscale), task_wcet=int(t['wcet']* unitscale), task_period=int(t['period']*unitscale), task_deadline=int(t['duration']*unitscale), priority=id_counter, message=False))
+        if system.get("PluginParameters"):
+            if system.get("PluginParameters").get("ExecutionTiming") == "WCET":
+                task_wcet_modified = int(t['wcet']* unitscale)
+            elif system.get("PluginParameters").get("ExecutionTiming") == "BCET":
+                task_wcet_modified = int(t['bcet']* unitscale)
+            elif system.get("PluginParameters").get("ExecutionTiming") == "Random":
+                task_wcet_modified = random.randint(int(t['bcet']* unitscale), int(t['wcet']* unitscale))
+        else:
+            task_wcet_modified = int(t['wcet']* unitscale)
+        task_set.append(Task.Task(task_id=id_counter, task_phase=int(t['initialOffset'] * unitscale), task_bcet=int(t['bcet']* unitscale), task_wcet=task_wcet_modified, task_period=int(t['period']*unitscale), task_deadline=int(t['duration']*unitscale), priority=id_counter, message=False))
         task_id_map[str(t['name'])] = id_counter
         id_task_map[str(id_counter)] = t
         id_counter = id_counter + 1
