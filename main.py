@@ -843,12 +843,14 @@ def scheduleLetSynchronise(system):
                             instances.append(instance);
         dependencyInstance['value'] = instances;
         export['DependencyInstancesStore'].append(dependencyInstance)
-
+    print("------------------------------------------------------------------------");
+    print(export["DependencyInstancesStore"]);
+    print("------------------------------------------------------------------------");
     #compute eventChainInstance
     export['EventChainInstanceStore'] = []
     for c in system['EventChainStore']:
         
-        dependencyInstances = getDependencyInstances(system, c["segment"]["name"])
+        dependencyInstances = getDependencyInstances(export, c["segment"]["name"])
         i = 0
         for dependencyInst in dependencyInstances['value']:
             successor = c.get('successor')
@@ -867,7 +869,7 @@ def scheduleLetSynchronise(system):
                 for t in system['TaskStore']:
                     if t['name'] == current["segment"]["receiveEvent"]["task"]:
                         afterTime = afterTime + t["duration"]
-                result = getNextDependencyInstance(system, successor["segment"]["name"], evtChainInst["segment"]["receiveEvent"]["timestamp"])
+                result = getNextDependencyInstance(export, successor["segment"]["name"], evtChainInst["segment"]["receiveEvent"]["timestamp"])
                 if (result == None):
                     #print ("XX")
                     #exit(0)
